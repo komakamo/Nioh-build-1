@@ -307,6 +307,8 @@ export default function RoninCodex() {
   const playerRef = useRef<Entity>({ maxHp: 100, hp: 100, maxKi: 100, ki: 100, atk: 10, def: 2, status: {}, buffs: {}, elementalAffinities: { physical: 1, fire: 1, water: 1, lightning: 1 } });
   const enemyRef = useRef<Entity>({ maxHp: 100, hp: 100, maxKi: 100, ki: 100, atk: 5, def: 0, status: {}, buffs: {}, elementalAffinities: { physical: 1, fire: 1, water: 1, lightning: 1 } });
   const cooldownsRef = useRef<{[key: string]: number}>({});
+  const enemySpecialRef = useRef<{ state: 'idle' | 'charging' | 'cooldown', timer: number }>({ state: 'idle', timer: 0 });
+  const tickRef = useRef(0);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   // --- GAME LOOP ---
@@ -315,6 +317,7 @@ export default function RoninCodex() {
 
     if (battleState === 'fighting') {
       interval = setInterval(() => {
+        tickRef.current += 1;
         setTick(t => t + 1);
         gameTick();
       }, 50); // Fast ticks
@@ -342,6 +345,10 @@ export default function RoninCodex() {
     let kiRegen = 1;
     let poisonBonus = 1;
     let lowHpBonus = 1;
+    if (p.status['defDown']) {
+      pDef = Math.max(0, pDef * 0.7);
+      p.status['defDown']--;
+    }
 
     // Apply Passives
     if (eq.some(s => s.id === 'toxic_executioner') && e.status['poison']) poisonBonus = 1.5;
@@ -404,7 +411,46 @@ export default function RoninCodex() {
       }
     });
 
-    // 5. Enemy Action (Simple AI)
+    // 5. Enemy Action (Special pattern + basic swings)
+    const currentTick = tickRef.current;
+    const specialInterval = Math.max(70, 160 - stage * 6);
+    const scaledInterval = Math.max(60, specialInterval - Math.floor(currentTick / 200));
+    const chargeDuration = 20;
+    const specialCooldown = Math.max(60, 140 - stage * 4);
+
+    if (enemySpecialRef.current.state === 'idle') {
+      enemySpecialRef.current.timer = enemySpecialRef.current.timer || scaledInterval;
+      enemySpecialRef.current.timer--;
+      if (enemySpecialRef.current.timer <= 0) {
+        enemySpecialRef.current.state = 'charging';
+        enemySpecialRef.current.timer = chargeDuration;
+        addLog(`${ENEMY_NAMES[(stage-1)%10]}が妖気を練り始めた...（強攻撃予兆）`, 'crit');
+      }
+    } else if (enemySpecialRef.current.state === 'charging') {
+      enemySpecialRef.current.timer--;
+      if (enemySpecialRef.current.timer <= 0) {
+        const heavyDamage = Math.max(1, (e.atk * 2.5 + stage * 1.5) - pDef);
+        if (!p.buffs['yokai']) {
+          const dealt = applyElementalDamage(p, heavyDamage, 'physical', addLog);
+          addLog(`鬼の大振り！ ${Math.floor(dealt)}ダメージと防御低下`, 'damage');
+          const debuffDuration = Math.max(60, 90 - stage * 2);
+          p.status['defDown'] = Math.max(p.status['defDown'] || 0, debuffDuration);
+        } else {
+          addLog(`妖怪化で強攻撃を無効化！`, 'info');
+        }
+        enemySpecialRef.current.state = 'cooldown';
+        enemySpecialRef.current.timer = specialCooldown;
+        addLog(`鬼が体勢を立て直している（クールダウン）`, 'info');
+      }
+    } else if (enemySpecialRef.current.state === 'cooldown') {
+      enemySpecialRef.current.timer--;
+      if (enemySpecialRef.current.timer <= 0) {
+        enemySpecialRef.current.state = 'idle';
+        enemySpecialRef.current.timer = scaledInterval;
+        addLog(`鬼が再び構えを整えた`, 'info');
+      }
+    }
+
     if (Math.random() < 0.05) {
       const dmg = Math.max(1, e.atk - pDef);
       if (!p.buffs['yokai']) {
@@ -457,6 +503,8 @@ export default function RoninCodex() {
       buffs: {},
       elementalAffinities: getEnemyAffinities(targetStage)
     };
+
+    enemySpecialRef.current = { state: 'idle', timer: Math.max(70, 160 - targetStage * 6) };
 
     cooldownsRef.current = {};
     setLogs([]);
