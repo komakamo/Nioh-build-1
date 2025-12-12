@@ -362,24 +362,24 @@ export default function RoninCodex() {
       setBattleState('won');
       const soulGain = stage * 10 + Math.floor(Math.random() * 20);
       setSouls(s => s + soulGain);
-      addLog(`勝利！ ${soulGain}の魂を獲得した。`, 'crit');
+      addLog(`第${stage}階層を制覇！ ${soulGain}の魂を獲得した。`, 'crit');
     } else if (p.hp <= 0) {
       setBattleState('lost');
       addLog(`敗北した...`, 'damage');
     }
   };
 
-  const startBattle = () => {
-    const hpScale = 1 + (stage * 0.2);
-    const atkScale = 1 + (stage * 0.15);
+  const startBattle = (targetStage: number = stage) => {
+    const hpScale = 1 + (targetStage * 0.2);
+    const atkScale = 1 + (targetStage * 0.15);
     
     playerRef.current = {
-      maxHp: 200 + (stage * 10),
-      hp: 200 + (stage * 10),
-      maxKi: 100 + (stage * 2),
-      ki: 100 + (stage * 2),
-      atk: 10 + (stage * 2),
-      def: 2 + Math.floor(stage * 0.5),
+      maxHp: 200 + (targetStage * 10),
+      hp: 200 + (targetStage * 10),
+      maxKi: 100 + (targetStage * 2),
+      ki: 100 + (targetStage * 2),
+      atk: 10 + (targetStage * 2),
+      def: 2 + Math.floor(targetStage * 0.5),
       status: {},
       buffs: {}
     };
@@ -390,15 +390,27 @@ export default function RoninCodex() {
       maxKi: 100,
       ki: 100,
       atk: Math.floor(8 * atkScale),
-      def: Math.floor(stage * 1),
+      def: Math.floor(targetStage * 1),
       status: {},
       buffs: {}
     };
 
     cooldownsRef.current = {};
     setLogs([]);
-    addLog(`第${stage}階層 - ${ENEMY_NAMES[(stage-1)%10]} との死合開始`, 'info');
+    addLog(`第${targetStage}階層 - ${ENEMY_NAMES[(targetStage-1)%10]} との死合開始`, 'info');
     setBattleState('fighting');
+  };
+
+  const handleBattleButton = () => {
+    if (battleState === 'won') {
+      setStage(prev => {
+        const nextStage = prev + 1;
+        startBattle(nextStage);
+        return nextStage;
+      });
+    } else {
+      startBattle();
+    }
   };
 
   const meditate = () => {
@@ -600,11 +612,11 @@ export default function RoninCodex() {
                 Surrender
               </button>
             ) : (
-              <button 
-                onClick={startBattle}
+              <button
+                onClick={handleBattleButton}
                 className={`w-full py-4 font-serif font-bold tracking-[0.3em] text-lg transition-all relative overflow-hidden group
-                  ${battleState === 'won' ? 'text-amber-100 bg-amber-900/20 border border-amber-600/50 hover:bg-amber-900/40' : 
-                    battleState === 'lost' ? 'text-slate-400 bg-slate-900 border border-slate-700 hover:bg-slate-800' : 
+                  ${battleState === 'won' ? 'text-amber-100 bg-amber-900/20 border border-amber-600/50 hover:bg-amber-900/40' :
+                    battleState === 'lost' ? 'text-slate-400 bg-slate-900 border border-slate-700 hover:bg-slate-800' :
                     'text-red-100 bg-red-950 border border-red-800 hover:bg-red-900 hover:border-red-600'}`}
               >
                 <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:animate-shine"></div>
