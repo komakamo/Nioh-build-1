@@ -15,6 +15,7 @@ interface Skill {
   cost: number; // Ki cost for actives
   cooldown?: number; // Ticks
   effect: (attacker: Entity, defender: Entity, context: BattleContext) => void;
+  element?: Element;
 }
 
 interface Entity {
@@ -26,11 +27,13 @@ interface Entity {
   def: number;
   status: { [key: string]: number }; // poison: 5, burn: 3 etc. (duration)
   buffs: { [key: string]: number }; // attackUp: 5
+  elementalAffinities?: Partial<Record<Element, number>>; // multiplier (1 = neutral)
 }
 
 interface BattleContext {
   log: (msg: string, type?: 'info' | 'damage' | 'heal' | 'crit') => void;
   tick: number;
+  applyDamage: (amount: number, element?: Element) => number;
 }
 
 // Skill Database with Synergies
@@ -44,10 +47,11 @@ const SKILL_DB: Skill[] = [
     description: '基本攻撃。100%の物理ダメージを与える。',
     cost: 10,
     cooldown: 20,
+    element: 'physical',
     effect: (a, d, ctx) => {
       const dmg = Math.max(1, a.atk - d.def);
-      d.hp -= dmg;
-      ctx.log(`${a.atk}のダメージを与えた`, 'damage');
+      const dealt = ctx.applyDamage(dmg, 'physical');
+      ctx.log(`${Math.floor(dealt)}のダメージを与えた`, 'damage');
     }
   },
   {
@@ -58,10 +62,11 @@ const SKILL_DB: Skill[] = [
     description: '高威力だが気力消費が激しい。180%ダメージ。',
     cost: 25,
     cooldown: 40,
+    element: 'physical',
     effect: (a, d, ctx) => {
       const dmg = Math.max(1, (a.atk * 1.8) - d.def);
-      d.hp -= dmg;
-      ctx.log(`強烈な一撃！ ${Math.floor(dmg)}ダメージ`, 'damage');
+      const dealt = ctx.applyDamage(dmg, 'physical');
+      ctx.log(`強烈な一撃！ ${Math.floor(dealt)}ダメージ`, 'damage');
     }
   },
   {
@@ -71,6 +76,7 @@ const SKILL_DB: Skill[] = [
     rarity: 1,
     description: '攻撃後、30%の確率で気力を15回復する。',
     cost: 0,
+    element: 'physical',
     effect: (a, d, ctx) => {
       if (Math.random() < 0.3) {
         a.ki = Math.min(a.maxKi, a.ki + 15);
@@ -88,8 +94,9 @@ const SKILL_DB: Skill[] = [
     description: '敵を毒状態にする(100ticks)。ダメージは低い。',
     cost: 15,
     cooldown: 50,
+    element: 'physical',
     effect: (a, d, ctx) => {
-      d.hp -= Math.max(1, a.atk * 0.2);
+      ctx.applyDamage(Math.max(1, a.atk * 0.2), 'physical');
       d.status['poison'] = (d.status['poison'] || 0) + 100;
       ctx.log(`敵を毒状態にした！`, 'info');
     }
@@ -101,6 +108,7 @@ const SKILL_DB: Skill[] = [
     rarity: 2,
     description: '毒状態の敵に対してダメージ+50%。',
     cost: 0,
+    element: 'physical',
     effect: (a, d, ctx) => {
       // Logic handled in damage calculation hook
     }
@@ -112,6 +120,7 @@ const SKILL_DB: Skill[] = [
     rarity: 3,
     description: '毒ダメージが発生するたび、自身のHPを回復する。',
     cost: 0,
+    element: 'physical',
     effect: (a, d, ctx) => {}
   },
 
@@ -123,6 +132,7 @@ const SKILL_DB: Skill[] = [
     rarity: 2,
     description: 'HPが30%以下の時、攻撃力が2倍になる。',
     cost: 0,
+    element: 'physical',
     effect: (a, d, ctx) => {}
   },
   {
@@ -133,6 +143,7 @@ const SKILL_DB: Skill[] = [
     description: 'HPを消費して、気力を全回復する。',
     cost: 0,
     cooldown: 100,
+    element: 'physical',
     effect: (a, d, ctx) => {
       a.hp -= a.maxHp * 0.2;
       a.ki = a.maxKi;
@@ -149,10 +160,11 @@ const SKILL_DB: Skill[] = [
     description: '火属性2連撃。火傷を付与する。',
     cost: 20,
     cooldown: 35,
+    element: 'fire',
     effect: (a, d, ctx) => {
       const dmg = Math.max(1, a.atk * 0.8);
-      d.hp -= dmg;
-      d.hp -= dmg;
+      ctx.applyDamage(dmg, 'fire');
+      ctx.applyDamage(dmg, 'fire');
       d.status['burn'] = (d.status['burn'] || 0) + 50;
       ctx.log(`炎の斬撃！ ${Math.floor(dmg * 2)}ダメージと火傷`, 'damage');
     }
@@ -164,6 +176,7 @@ const SKILL_DB: Skill[] = [
     rarity: 2,
     description: '気力回復速度が2倍になる。防御力ダウン。',
     cost: 0,
+    element: 'water',
     effect: (a, d, ctx) => {}
   },
 
@@ -175,6 +188,7 @@ const SKILL_DB: Skill[] = [
     rarity: 4,
     description: '全てのスキルのクールダウンを半減させる。',
     cost: 0,
+    element: 'physical',
     effect: (a, d, ctx) => {}
   },
   {
@@ -185,6 +199,7 @@ const SKILL_DB: Skill[] = [
     description: '一時的に無敵になり、攻撃力が3倍になる(100ticks)。',
     cost: 100,
     cooldown: 500,
+    element: 'lightning',
     effect: (a, d, ctx) => {
       a.buffs['yokai'] = 100;
       ctx.log(`<<< 妖怪化 >>>`, 'crit');
@@ -196,7 +211,49 @@ const ENEMY_NAMES = [
   "野武士", "骸武者", "赤鬼", "大蜘蛛", "烏天狗", "雪女", "鵺", "大百足", "九尾の狐", "魔王"
 ];
 
+const ELEMENTS: Element[] = ['physical', 'fire', 'water', 'lightning'];
+
 // --- HELPERS ---
+
+const getEnemyAffinities = (stage: number): Partial<Record<Element, number>> => {
+  const base: Partial<Record<Element, number>> = { physical: 1, fire: 1, water: 1, lightning: 1 };
+  const weaknesses: Element[] = ['fire', 'water', 'lightning'];
+  const weakness = weaknesses[(stage - 1) % weaknesses.length];
+  const resistance = weakness === 'fire' ? 'water' : weakness === 'water' ? 'lightning' : 'fire';
+
+  base[weakness] = 1.3;
+  base[resistance] = 0.7;
+
+  return base;
+};
+
+const getElementLabel = (element: Element) => {
+  switch(element) {
+    case 'fire': return { label: '火', color: 'text-orange-400', bg: 'bg-orange-900/30', border: 'border-orange-900/40', icon: <Flame size={10}/> };
+    case 'water': return { label: '水', color: 'text-blue-300', bg: 'bg-blue-900/30', border: 'border-blue-900/40', icon: <Droplets size={10}/> };
+    case 'lightning': return { label: '雷', color: 'text-yellow-300', bg: 'bg-yellow-900/30', border: 'border-yellow-900/40', icon: <Zap size={10}/> };
+    default: return { label: '物理', color: 'text-slate-200', bg: 'bg-slate-800/50', border: 'border-slate-700', icon: <Sword size={10}/> };
+  }
+};
+
+const applyElementalDamage = (
+  defender: Entity,
+  amount: number,
+  element: Element,
+  log: BattleContext['log']
+) => {
+  const modifier = defender.elementalAffinities?.[element] ?? 1;
+  const finalDamage = Math.max(1, amount * modifier);
+  defender.hp -= finalDamage;
+
+  if (modifier > 1.05) {
+    log('弱点を突いた！', 'crit');
+  } else if (modifier < 0.95) {
+    log('耐性によりダメージ軽減', 'info');
+  }
+
+  return finalDamage;
+};
 
 const getRarityStyles = (r: number) => {
   switch(r) {
@@ -247,8 +304,8 @@ export default function RoninCodex() {
   const [tick, setTick] = useState(0);
 
   // Entities Ref (Mutable for game loop performance)
-  const playerRef = useRef<Entity>({ maxHp: 100, hp: 100, maxKi: 100, ki: 100, atk: 10, def: 2, status: {}, buffs: {} });
-  const enemyRef = useRef<Entity>({ maxHp: 100, hp: 100, maxKi: 100, ki: 100, atk: 5, def: 0, status: {}, buffs: {} });
+  const playerRef = useRef<Entity>({ maxHp: 100, hp: 100, maxKi: 100, ki: 100, atk: 10, def: 2, status: {}, buffs: {}, elementalAffinities: { physical: 1, fire: 1, water: 1, lightning: 1 } });
+  const enemyRef = useRef<Entity>({ maxHp: 100, hp: 100, maxKi: 100, ki: 100, atk: 5, def: 0, status: {}, buffs: {}, elementalAffinities: { physical: 1, fire: 1, water: 1, lightning: 1 } });
   const cooldownsRef = useRef<{[key: string]: number}>({});
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -320,12 +377,16 @@ export default function RoninCodex() {
     eq.forEach(skill => {
       if (skill.type === 'active') {
         const currentCD = cooldownsRef.current[skill.id] || 0;
-        
+
         if (currentCD <= 0) {
           if (p.ki >= skill.cost) {
             p.ki -= skill.cost;
-            const ctx: BattleContext = { log: addLog, tick: 0 };
-            
+            const ctx: BattleContext = {
+              log: addLog,
+              tick: 0,
+              applyDamage: (amount: number, element: Element = skill.element || 'physical') => applyElementalDamage(e, amount, element, addLog)
+            };
+
             const originalAtk = p.atk;
             p.atk = finalAtk;
             skill.effect(p, e, ctx);
@@ -344,11 +405,11 @@ export default function RoninCodex() {
     });
 
     // 5. Enemy Action (Simple AI)
-    if (Math.random() < 0.05) { 
+    if (Math.random() < 0.05) {
       const dmg = Math.max(1, e.atk - pDef);
       if (!p.buffs['yokai']) {
-        p.hp -= dmg;
-        addLog(`${ENEMY_NAMES[(stage-1)%10]}の攻撃！ ${Math.floor(dmg)}ダメージ`, 'damage');
+        const dealt = applyElementalDamage(p, dmg, 'physical', addLog);
+        addLog(`${ENEMY_NAMES[(stage-1)%10]}の攻撃！ ${Math.floor(dealt)}ダメージ`, 'damage');
       } else {
         addLog(`妖怪化により攻撃を無効化！`, 'info');
       }
@@ -381,7 +442,8 @@ export default function RoninCodex() {
       atk: 10 + (targetStage * 2),
       def: 2 + Math.floor(targetStage * 0.5),
       status: {},
-      buffs: {}
+      buffs: {},
+      elementalAffinities: { physical: 1, fire: 1, water: 1, lightning: 1 }
     };
 
     enemyRef.current = {
@@ -392,7 +454,8 @@ export default function RoninCodex() {
       atk: Math.floor(8 * atkScale),
       def: Math.floor(targetStage * 1),
       status: {},
-      buffs: {}
+      buffs: {},
+      elementalAffinities: getEnemyAffinities(targetStage)
     };
 
     cooldownsRef.current = {};
@@ -684,6 +747,28 @@ export default function RoninCodex() {
                 <div className="text-center mb-4">
                   <h2 className="text-xl font-serif text-slate-200">{ENEMY_NAMES[(stage-1)%10]}</h2>
                   <p className="text-[10px] text-slate-500 uppercase tracking-widest mt-1">Floor {stage} Boss</p>
+                  <div className="flex flex-wrap gap-2 justify-center mt-3">
+                    {(enemyRef.current.elementalAffinities ? ELEMENTS.filter(el => (enemyRef.current.elementalAffinities?.[el] ?? 1) > 1.05) : []).map(el => {
+                      const info = getElementLabel(el);
+                      return (
+                        <div key={`weak-${el}`} className={`flex items-center gap-1 px-2 py-1 rounded border ${info.border} ${info.bg} ${info.color} text-[10px] font-semibold uppercase`}>
+                          {info.icon}
+                          <span>Weak</span>
+                          <span>{info.label}</span>
+                        </div>
+                      );
+                    })}
+                    {(enemyRef.current.elementalAffinities ? ELEMENTS.filter(el => (enemyRef.current.elementalAffinities?.[el] ?? 1) < 0.95) : []).map(el => {
+                      const info = getElementLabel(el);
+                      return (
+                        <div key={`resist-${el}`} className={`flex items-center gap-1 px-2 py-1 rounded border ${info.border} ${info.bg} ${info.color} text-[10px] font-semibold uppercase opacity-70`}>
+                          {info.icon}
+                          <span>Resist</span>
+                          <span>{info.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
 
                  <div className="flex gap-2 justify-center text-xs mt-auto w-full">
